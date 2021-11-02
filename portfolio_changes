@@ -1,0 +1,104 @@
+#Installing packages and corresponding libraries to read and write excel sheets
+install.packages("readxl")
+install.packages("tidyverse")
+install.packages("writexl")
+install.packages("googlesheets4")
+library("googlesheets4")
+library("tidyverse")
+library("readxl")
+library("writexl")
+
+#Reading,checking the data sources and cleaning them.
+updates <- read_excel("updates.xlsx")
+mrw <- read_excel("Raw_data.xlsx")
+comments <- read_excel("comments.xlsx")
+head(mrw)
+head(updates)
+
+#Filtering by phase and status changes
+uf <- updates %>% filter(Name == "Status"| Name == "Phase" )
+names(uf)[4] <- "Name"
+names(uf)[5] <- "Change"
+names(mrw)[2] <- "Project_Number"
+names(mrw)[17]<- "PLOPS_Leader"
+names(comments)[2] <- "Name"
+head(uf)
+
+#performing left joins of three tables to track updates and the latest comments 
+df<- mrw %>% left_join(uf,by="Name")
+data.frame(colnames(df))
+names(df)[68] <- "Change_in_Status"
+names(df)[70]<-"Change_in_Phase"
+names(df)[77]<- "New_Project"
+df_updated<- df %>% filter((Change_in_Status == "YES" | Change_in_Phase == "YES")& New_Project == "NO" )
+
+df_updated_comments <- df_updated %>% left_join(comments, by="Name")
+data.frame(colnames(df_updated_comments))
+data.frame(colnames(mrw))
+df
+
+#finding the last updated value using R and treatment of date and time 
+# exta snippet if needed %>%group_by(Last_act_datestamp) but returns errors
+
+df_updated_comments =df_updated_comments %>%group_by(Name)%>%slice(which.max(Last_act_timestamp))
+
+#writing the data into google sheets
+sheet_write(df_updated_comments)
+sheet_append("1jnR8TXiLGF7mHuTJU_UmalnIKSypySgPmPlj1Zz0Rg0", df_updated_comments)
+
+#writing the cleaned file so that it can be tracked through Google data studio
+write_xlsx(df_updated_comments, "change_tracking.xlsx")
+
+#install packages to treat the time and date dimensions
+install.packages("lubridate")
+install.packages("pastecs")
+library("pastecs")
+library("lubridate")
+library("tidyverse")
+
+#Calculating the planned timeline and cleaning the data(creating calculated dimensions)
+start <- mrw$`Planned timeline - Start`
+end <- mrw$`Planned timeline - End`
+elapsed.time_1 <- start %--% end
+mrw$planned_pipeleine_time <- as.duration(elapsed.time_1)/ddays(1)
+mrw$planned_pipeleine_time
+mrw$planned_pipeleine_time[is.na(mrw$planned_pipeleine_time)] = 0
+
+#Calculating the baseline timeline and removing NAs
+start_base <- mrw$`Baseline timeline - Start`
+end_base <- mrw$`Baseline timeline - End`
+elapsed.time <- start_base %--% end_base
+mrw$pipeline_time_base <- as.duration(elapsed.time)/ddays(1)
+mrw$pipeline_time_base[is.na(mrw$pipeline_time_base)] = 0
+boxplot(mrw$planned_pipeleine_time, main = "Boxplot of planned pipeline time with null values", xlab = "time in the pipeline", ylab = "days",col="Orange",border= "brown", notch = TRUE)
+boxplot(mrw$pipeline_time_base, main = "Boxplot of baseline pipeline time with null values", xlab = "time in the pipeline", ylab = "days",col="Orange",border= "brown", notch = TRUE)
+
+#Filtering values that only have a timeline
+mrw_timeline_filter <- filter(mrw,planned_pipeleine_time > 0)
+mrw_timeline_filter<- filter(mrw,pipeline_time_base > 0)
+
+#calculating the deviation between planned and baseline timelines
+mrw_timeline_filter$plan_base_dev <- (mrw_timeline_filter$planned_pipeleine_time - mrw_timeline_filter$pipeline_time_base)
+
+#plotting the timelines as a box plots including individual plots
+boxplot(mrw_timeline_filter$planned_pipeleine_time, main = "Boxplot of planned pipeline time", xlab = "time in the pipeline", ylab = "days",col="Orange",border= "brown", notch = TRUE)
+
+boxplot(mrw_timeline_filter$pipeline_time_base, main = "Boxplot of baseline pipeline time", xlab = "time in the pipeline", ylab = "days",col="Orange",border= "brown", notch = TRUE)
+
+data.frame(colnames(mrw_timeline_filter))
+boxplot(mrw_timeline_filter[c(82,83)],main = "Boxplot of timelines", xlab = "time in the pipeline", ylab = "days",col="Orange",border= "brown", notch = TRUE)
+
+#statistic description of the filtered timelines(baseline and planning)
+stat.desc(mrw_timeline_filter,1)
+stat.desc(mrw_timeline_filter$plan_base_dev,1)
+names(mrw_timeline_filter)[21] <- "Larger_Cluster" 
+#Pipeline days according to the 
+ggplot(data = mrw_timeline_filter) + geom_point(mapping= aes(x = Name , y=planned_pipeleine_time,color = Larger_Cluster))
+
+
+qplot(mrw_timeline_filter$pipeline_time_base, data = mrw_timeline_filter, geom = "histogram", fill= Larger_Cluster)
+qplot(mrw_timeline_filter$planned_pipeleine_time, data = mrw_timeline_filter, geom = "histogram", fill= Larger_Cluster)
+
+plot(mrw_timeline_filter$plan_base_dev)
+
+#ggplot(data= mrw) + geom_point(mapping = aes(x = PLOPS_Leader, y = prj))
